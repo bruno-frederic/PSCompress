@@ -28,40 +28,65 @@ Describe "Encrypted archives" {
 
     $Samplefile = 'Samplefile.txt'
     'Sample content' | Out-File $Samplefile
+    $Size = Get-Item $Samplefile | Select-Object -expand Length
     $CRC32 = get-Filecrc32 -LiteralPath $Samplefile| Select-Object -Expand Hash
   }
 
   It 'ZipCrypto' {
     Remove-Item Archive.*
-    cmd /c start /wait d:\utils\winrar\WinRAR a -s -psomepas -mezl Archive.zip $Samplefile
+    cmd /c start /wait d:\utils\winrar\WinRAR a -psomepas -mezl Archive.zip $Samplefile
     $o = Get-ArchiveInfo -Password somepas -LiteralPath Archive.zip
 
     $o.Fullname | Should -Be $Samplefile
+    $o.Size     | Should -Be $Size
     $o.CRC      | Should -Be $CRC32
     $LASTEXITCODE | Should -Be 0
   }
 
   It 'Zip AES-256' {
     Remove-Item Archive.*
-    cmd /c start /wait d:\utils\winrar\WinRAR a -s -psomepas Archive.zip $Samplefile
+    cmd /c start /wait d:\utils\winrar\WinRAR a -psomepas Archive.zip $Samplefile
     $o = Get-ArchiveInfo -Password somepas -LiteralPath Archive.zip
 
-    Write-Host $o
     $o.Fullname | Should -Be $Samplefile
-    # FIXME : Get-ArchiveInfo retourne un CRC 00000000
+    $o.Size     | Should -Be $Size
+    Write-Host "$o : " -NoNewline
+    Write-Host "# BUG de SharpCompress qui retourne un CRC 00000000."
     #$o.CRC      | Should -Be $CRC32
     $LASTEXITCODE | Should -Be 0
   }
 
+  It '7z Encrypted' {
+    Remove-Item Archive.*
+    7z a -psomepas     Archive.7z $Samplefile
+    $o = Get-ArchiveInfo -Password somepas -LiteralPath Archive.7z
+
+    $o.Fullname | Should -Be $Samplefile
+    $o.Size     | Should -Be $Size
+    $o.CRC      | Should -Be $CRC32
+    $LASTEXITCODE | Should -Be 0
+  }
+
+  It '7z filenames Encrypted' {
+    Remove-Item Archive.*
+    7z a -psomepas -mhe Archive.7z $Samplefile
+    $o = Get-ArchiveInfo -Password somepas -LiteralPath Archive.7z
+
+    $o.Fullname | Should -Be $Samplefile
+    $o.Size     | Should -Be $Size
+    $o.CRC      | Should -Be $CRC32
+    $LASTEXITCODE | Should -Be 0
+  }
 
   It 'RAR Encrypted' {
     Remove-Item Archive.*
     rar a -psomepas Archive.rar $Samplefile
     $o = Get-ArchiveInfo -Password somepas -LiteralPath Archive.rar
 
-    Write-Host $o
     $o.Fullname | Should -Be $Samplefile
-    # FIXME : Get-ArchiveInfo retourne un CRC aléatoire incorrect. Probablement un bug SharpCompress
+    $o.Size     | Should -Be $Size
+    Write-Host "$o : " -NoNewline
+    Write-Host "# BUG de SharpCompress qui retourne un CRC aléatoire incorrect."
     #$o.CRC      | Should -Be $CRC32
     $LASTEXITCODE | Should -Be 0
   }
@@ -72,6 +97,7 @@ Describe "Encrypted archives" {
     $o = Get-ArchiveInfo -Password somepas -LiteralPath Archive.rar
 
     $o.Fullname | Should -Be $Samplefile
+    $o.Size     | Should -Be $Size
     $o.CRC      | Should -Be $CRC32
     $LASTEXITCODE | Should -Be 0
   }

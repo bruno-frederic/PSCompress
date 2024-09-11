@@ -33,10 +33,19 @@ Affiche le taux de compression et autres informations pour pouvoir trier ensuite
 .DESCRIPTION
 Format supportés par SharpCompress :
 https://github.com/adamhathcock/sharpcompress/blob/master/FORMATS.md
+Étonnant : en 2024 0.37.2, les bz2 simple (sans tar) ne sont pas supporté par SharpCompress
 
-TODO : Révérifier ce que supporte SharpCompress comme format 7z par des tests!!!
-Il faudrait y accéder via les classes Archive car c’est un format différent, cf note 4
-Archive classes allow random access to a seekable stream.
+Pour tester le support des différents formats, crééer un jeu de test avec CreeJeuDeTest.ps1 puis :
+import-module -force PSCompress ; gci * | get-archiveInfo -password somepas | select * | ft
+
+Et sur mes arborescence :
+parcours_arbo.py --include *.7z --include *.rar --include *.zip --include *.docx --include *.xlsx --include epub |
+    get-archiveInfo | select * | ogv
+
+Pour les chiffrées:
+    parcours_arbo.py --include *.bkp | Get-archiveInfo -password somepas | select * | ogv
+
+
 
 ATTENTION : MARCHE MIEUX dans le terminal VS Code "PowerShell Extension" spécifiquement
 (manque des assembly dans la console Powershell qu’il faut rajouter manuellement, ce que j’ai fait
@@ -157,7 +166,7 @@ Param(
     [string[]]$LiteralPath,
 
     [Parameter()]
-    [string]
+    [string] # TODO transformer en Secure String
     $Password
 )
 
@@ -199,22 +208,43 @@ Process
             RatioPct         = $null
             CRC              = $null
         }
-        $filestream = $null
-        $reader = $null
+        $archive     = $null
+        $filestream  = $null
+        $reader      = $null
         #$reader = ''    # création de la variable pour que le finally puisse la détruire (il me semble que $null posait problême car pas de méthode Dispose)
 
         try
         {
-            $filestream = [System.IO.File]::OpenRead($FullName)
-
             $opts = New-Object SharpCompress.Readers.ReaderOptions -Property @{
-               Password        = $Password
+                Password        = $Password
+            }
+            [System.Collections.ArrayList] $entries = @()
+
+
+            if ($FullName -Like '*.7z')
+            {
+                # 7zip est particulier, il faudrait y accéder via les classes Archive car c’est un
+                # format complexe, cf note 4 :
+                #  https://github.com/adamhathcock/sharpcompress/blob/master/FORMATS.md
+
+                $archive = [SharpCompress.Archives.SevenZip.SevenZipArchive]::Open($FullName, $opts)
+
+                $entries = @($archive.Entries)
+            }
+            else
+            {
+                $filestream = [System.IO.File]::OpenRead($FullName)
+
+                # Use ReaderFactory to autodetect archive type and Open the entry stream
+                $reader = [SharpCompress.Readers.ReaderFactory]::Open($filestream, $opts)
+
+                while ($reader.MoveToNextEntry())
+                {
+                    $entries.Add($reader.Entry) | Out-Null
+                }
             }
 
-            # Use ReaderFactory to autodetect archive type and Open the entry stream
-            $reader = [SharpCompress.Readers.ReaderFactory]::Open($filestream, $opts)
-
-            while ($reader.MoveToNextEntry())
+            foreach ($entry in $entries)
             {
                 $o.Fullname         = $null
                 $o.Extension        = $null
@@ -223,19 +253,20 @@ Process
                 $o.RatioPct         = $null
                 $o.CRC              = $null
 
-                if($reader.Entry.IsDirectory)
+
+                if($entry.IsDirectory)
                 {
-                    Write-Verbose "Dossier ignoré : $($reader.Entry.Key)"
+                    Write-Verbose "Dossier ignoré : $($entry.Key)"
                 }
                 else
                 {
-                    $o.Fullname         = $reader.Entry.Key
-                    $o.Extension        = [System.IO.Path]::GetExtension($reader.Entry.Key)
-                    $o.Size             = $reader.Entry.Size
-                    $o.CompressedSize   = $reader.Entry.CompressedSize
-                    $o.CRC              = $reader.Entry.Crc.ToString('X8')
+                    $o.Fullname         = $entry.Key
+                    $o.Extension        = [System.IO.Path]::GetExtension($entry.Key)
+                    $o.Size             = $entry.Size
+                    $o.CompressedSize   = $entry.CompressedSize
+                    $o.CRC              = $entry.Crc.ToString('X8')
 
-                    if (0 -ne $reader.Entry.Size)
+                    if (0 -ne $entry.Size)
                     {
                         <# Sur certains fichiers Zip, comme les docx produit par Google Docs/Takeout
                         SharpCompres retourne des Size à 0. Point commun : Ils ont tous
@@ -247,8 +278,8 @@ Process
 
                         Je les ai réenregistrés dans Word avec après une modification mineure.
                         #>
-                        $o.RatioPct = [int] [Math]::Floor(100 * $reader.Entry.CompressedSize /
-                                                                $reader.Entry.Size)
+                        $o.RatioPct = [int] [Math]::Floor(100 * $entry.CompressedSize /
+                                                                $entry.Size)
                     }
 
                     # Création de l'objet de sortie :
@@ -261,12 +292,15 @@ Process
         }
         catch [System.Management.Automation.MethodInvocationException]
         {
-            if (($FullName -Like '*.docx' -or $FullName -Like '*.xlsx') -and
-                'InvalidOperationException' -eq $_.FullyQualifiedErrorId)
+            if ('InvalidOperationException' -eq $_.FullyQualifiedErrorId)
             {
-                # Ce cas arrive sur les fichiers Office cryptés avec un pass
+                # Ce cas arrive sur les formats d’archives non supportés
+                # et les fichiers Office cryptés avec un pass
                 # SharpCompress n’arrive pas à ouvrir l’archive
-                $o.FullName = "/!\ CRYPTÉ : $FullName ($($_.Exception.InnerException.Message))"
+
+                Write-Warning "$Fullname : Ouverture impossible ($($_.Exception.InnerException.Message))"
+
+                $o.FullName = "/!\ $FullName ($($_.Exception.InnerException.Message))"
 
                 # Création de l'objet de sortie :
                 $objet_en_sortie = New-Object -TypeName PSObject -Property $o
@@ -274,13 +308,23 @@ Process
                             -Name PSStandardMembers -Value $standardMembers
                 Write-Output $objet_en_sortie
             }
+            elseif ('IOException' -eq $_.FullyQualifiedErrorId)
+            {
+                Write-Warning "$Fullname : Ouverture impossible ($($_.Exception.InnerException.Message))"
+            }
             elseif ('CryptographicException' -eq $_.FullyQualifiedErrorId)
             {
                 Write-Warning "$Fullname : Déchiffrement impossible ($($_.Exception.InnerException.Message))"
             }
-            elseif ('IOException' -eq $_.FullyQualifiedErrorId)
+            elseif ('MultiVolumeExtractionException' -eq $_.FullyQualifiedErrorId)
             {
-                Write-Warning "$Fullname : Ouverture impossible ($($_.Exception.InnerException.Message))"
+                # Se produit sur Rar multivolume notament
+                Write-Warning "$Fullname : MultiVolumeExtractionException ($($_.Exception.InnerException.Message))"
+            }
+            elseif ('InvalidFormatException' -eq $_.FullyQualifiedErrorId)
+            {
+                # Se produit sur les Rar4 chiffrés entête + fichiers : Unknown Rar Header: …
+                Write-Warning "$Fullname : Déchiffrement impossible d’un Rar4 ($($_.Exception.InnerException.Message))"
             }
             elseif ('TypeInitializationException' -eq $_.FullyQualifiedErrorId)
             {
@@ -307,6 +351,10 @@ Process
         }
         finally
         {
+            if ($archive)
+            {
+                $archive.Dispose()
+            }
             if ($reader)
             {
                 $reader.Dispose()
