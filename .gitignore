@@ -1,0 +1,4 @@
+SharpCompress*.dll
+System.*.dll
+System.*.xml
+coverage.xml

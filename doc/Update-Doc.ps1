@@ -1,17 +1,11 @@
-# PSCompress
-PSCompress module provides advanced archive compression and uncompression cmdlets to Powershell
+﻿<#
+.SYNOPSIS
+Generates markdown help file from all cmdlets source code
 
+.DESCRIPTION
+web : https://github.com/bruno-frederic/PSCompress
 
-# Available cmdlets
-- [Compress-RarArchive](doc/Compress-RarArchive.md) : Equivalent of Microsoft's Compress-Archive
-cmdlet but calls `rar` executable to create a `.rar` archive.
-### Requirements
-- Rar command-line executable in the *PATH* environment</BR>
-  Executable available here : https://www.rarlab.com/
-
-
-
-# LICENSE
+.NOTES
 Copyright © 2022 Bruno FREDERIC
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU
@@ -24,3 +18,12 @@ General Public License for more details.
 
 You should have received a copy of the GNU General Public License along with this program. If not,
 see <https://www.gnu.org/licenses/>.
+#>
+
+Set-StrictMode -Version 3
+
+# https://github.com/PowerShell/platyPS/blob/master/docs/New-MarkdownHelp.md
+Import-Module PlatyPS -ErrorAction Stop
+
+Import-Module PSCompress -Force
+New-MarkdownHelp -Module "PSCompress" -OutputFolder "." -Force
