@@ -37,7 +37,8 @@ Describe "Encrypted archives" {
 
   It 'ZipCrypto' {
     Remove-Item Archive.*
-    cmd /c start /wait d:\utils\winrar\WinRAR a -p"$Pass" -mezl Archive.zip $Samplefile
+    Start-Process -Wait -FilePath d:\utils\winrar\WinRAR `
+              -ArgumentList "a -ibck -p'$Pass' -mezl Archive.zip $Samplefile"
     $o = Get-ArchiveInfo -Password $SecurePass -LiteralPath Archive.zip
 
     $o.Fullname | Should -Be $Samplefile
@@ -48,13 +49,16 @@ Describe "Encrypted archives" {
 
   It 'Zip AES-256' {
     Remove-Item Archive.*
-    cmd /c start /wait d:\utils\winrar\WinRAR a -p"$Pass" Archive.zip $Samplefile
+    Start-Process -Wait -FilePath d:\utils\winrar\WinRAR `
+              -ArgumentList "a -ibck -p'$Pass' Archive.zip $Samplefile"
     $o = Get-ArchiveInfo -Password $SecurePass -LiteralPath Archive.zip
 
     $o.Fullname | Should -Be $Samplefile
     $o.Size     | Should -Be $Size
     Write-Host "$o : " -NoNewline
-    Write-Host "# BUG de SharpCompress qui retourne un CRC 00000000."
+    Write-Host "SharpCompress retourne un CRC 00000000, tout comme 7z : " -NoNewline
+    7z l -slt -p"$Pass" Archive.zip | Select-String CRC.= | Write-Host
+
     #$o.CRC      | Should -Be $CRC32
     $LASTEXITCODE | Should -Be 0
   }
@@ -83,13 +87,19 @@ Describe "Encrypted archives" {
 
   It 'RAR Encrypted' {
     Remove-Item Archive.*
-    rar a -ps"$Pass" Archive.rar $Samplefile
+    rar a -p"$Pass" Archive.rar $Samplefile
     $o = Get-ArchiveInfo -Password $SecurePass -LiteralPath Archive.rar
 
     $o.Fullname | Should -Be $Samplefile
     $o.Size     | Should -Be $Size
     Write-Host "$o : " -NoNewline
-    Write-Host "# BUG de SharpCompress qui retourne un CRC aléatoire incorrect."
+    Write-Host "SharpCompress retourne un CRC incorrect, le même que WinRar et Rar :" -NoNewline
+    # Cela me parait plus robuste qu’on ne connaisse pas le CRC d’un fichier chiffré pour ne pas
+    # aider au déchiffrement.
+    rar lt -p"$Pass" Archive.rar | Select-String CRC32 | Write-Host
+    Write-Host "Tandis que 7z retourne un CRC vide : " -NoNewline
+    7z l -slt -p"$Pass" Archive.rar | Select-String CRC.= | Write-Host
+
     #$o.CRC      | Should -Be $CRC32
     $LASTEXITCODE | Should -Be 0
   }
