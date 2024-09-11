@@ -1,4 +1,5 @@
 SharpCompress*.dll
+ZstdSharp.dll
 System.*.dll
 System.*.xml
 coverage.xml

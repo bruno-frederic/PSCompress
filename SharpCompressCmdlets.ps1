@@ -31,8 +31,9 @@ function Get-ArchiveInfo
 Affiche le taux de compression et autres informations pour pouvoir trier ensuite.
 
 .DESCRIPTION
-ATTENTION : NE MARCHE QUE dans le terminal VS Code "PowerShell Extension" spécifiquement
-(manque des assembly dans la console Powershell)
+ATTENTION : MARCHE MIEUX dans le terminal VS Code "PowerShell Extension" spécifiquement
+(manque des assembly dans la console Powershell qu’il faut rajouter manuellement, ce que j’ai fait
+pour certaines verison de SharpCompress)
 
 Permet de détecter quels types de fichier il est inutile de recompresser
 Anciennement nommée "Get-RARRatio"
@@ -60,22 +61,50 @@ Get-ArchiveInfo fichier.rar | Group-object -property Extension |
 Rapport en calculant une moyenne des ratios par extension (la moyenne est faussée car un petit
 fichier a la même importance qu'un très gros dans cette manière de calculer)
 
+.EXAMPLE
+parcours_arbo.py --include *.docx --include *.xlsx | Get-ArchiveInfo | 
+    ? { $_.Fullname -Like '*/media/*' -Or $_.Fullname -Like '*/embeddings/*'  -Or $_.Fullname -Like '*/fonts/*'} |
+    Select * | OGV
+Localise les images et pièces-jointes les plus volumineuses au sein des fichiers Word.
+
+.EXAMPLE
+parcours_arbo.py --include *.docx --include *.xlsx | Get-ArchiveInfo | 
+    ? { $_.Fullname -Like '*/media/*' -Or $_.Fullname -Like '*/embeddings/*'  -Or $_.Fullname -Like '*/fonts/*'} |
+    Group Extension  -NoElement
+Rapport sur les types de fichiers inclus dans les DOCX et XLSX
+
+.EXAMPLE
+parcours_arbo.py --include *.docx --include *.xlsx | Get-ArchiveInfo | ? CRC -Match '00000000' |
+    Select ArchiveName,CRC | OGV
+Localise les fichiers xlsx, docx bizarres produits par Google Docs/Takeout
+
 .NOTES
 Historique :
     20/03/2021 : correction de la gestion du pipeline
     07/07/2021 : renommé en Get-ArchiveInfo, déplacé dans UtilsCompress et utilise SharpCompress
+    16/11/2023 : Mis sous Github, la suite de l’historique dans le log Git…
 
 
 Utilise la libriaire SharpCompress
 Doc     : https://github.com/adamhathcock/sharpcompress/blob/master/USAGE.md
 Package : https://www.nuget.org/packages/SharpCompress/
 
-NB : Utiliser la verison 0.26.0 "net46" sous le terminal VS Code, la seule qui marche.
-en effet netstandard2.0 : L'assembly se charge mais déconne à l'utilisation dans VS Code et
-                          dans console Powershell
-et   netstandard2.1 : L'assembly refuse de se charger, manque l'assembly netstandard, Version=2.1
-Et impossible de charger les assemblies des dernières version 0.27 et 0.28 de SharpCompress
-    car il manque System.Runtime, Version=5.0.0.0 ou autres.
+Cette librairie pour fonctionner en dehors de VS Code nécessite de récupérer plusieurs assemblies
+dans des versions précises sur Nuget, c’est fastidieux.
+
+J’ai pu faire fonctionner les versions 0.32.2 "net461" puis 0.37.2 "net462" de SharpCompress sous le
+terminal VS Code et en dehors en rajoutant les assemblies dans le même dossier que SharpCompress.dll
+
+Pour la v0.37.2 : il faut ajouter l'assembly 'ZstdSharp' v 0.8.0.0 précisément
+https://github.com/oleg-st/ZstdSharp/releases
+et d’autres assemblies System… pour que ça marche dans une fenêtre windows terminal et pas
+uniquement dans VSCode et Powershell Extension :
+    system.buffers.4.5.1.nupkg = 4.0.3.0 en net461.zip
+    system.memory.4.5.5.nupkg
+    system.numerics.vectors.4.5.0.nupkg
+    system.runtime.compilerservices.unsafe.4.5.3.nupkg
+    system.threading.tasks.extensions.4.5.4.nupkg
+    ZstdSharp.Port.0.8.0.nupkg
 
 
 La librairie SharpCompress permet de récupérer des objet Entry qui ont ces propriétés :
@@ -128,7 +157,7 @@ Begin
     Import-Module $AssemblyPath
 
 
-    # Définit les prorpiétés afffichées par défaut :
+    # Définit les prorpiétés affichées par défaut :
     $Affiches_par_defaut = @(
         'Fullname'
 		'Size',
@@ -149,43 +178,108 @@ Process
                                      GetUnresolvedProviderPathFromPSPath($literal_path_courant)
         Write-Verbose $FullName
 
+        # Propriétés de l’objet de sortie :
+        $o = [ordered]@{
+            ArchiveName      = $FullName
+            Fullname         = $null
+            Extension        = $null
+            Size             = $null
+            CompressedSize   = $null
+            RatioPct         = $null
+            CRC              = $null
+        }
+        $filestream = $null
+        $reader = ''    # création de la variable pour que le finally puisse la détruire (il me semble que $null posait problême car pas de méthode Dispose)
+
         try
         {
             $filestream = [System.IO.File]::OpenRead($FullName)
-            #TODO a finir
-            Write-Host "ici"
+            $reader = [SharpCompress.Readers.ReaderFactory]::Open($filestream)
 
+            #TODO Support des archives cryptées
 <#            $opts = New-Object SharpCompress.Readers.ReaderOptions -Property @{
                LeaveStreamOpen = $True
                #Password        = 'xxxx yyyy xxxx' # Ca marche sur les .zip cryptés mais pas avec les .rar
             }
             $reader = [SharpCompress.Readers.ReaderFactory]::Open($filestream, $opts)
 #>
-            $reader = [SharpCompress.Readers.ReaderFactory]::Open($filestream)
-         #   $reader | Get-Member
 
             while ($reader.MoveToNextEntry())
             {
+                $o.Fullname         = $null
+                $o.Extension        = $null
+                $o.Size             = $null
+                $o.CompressedSize   = $null
+                $o.RatioPct         = $null
+                $o.CRC              = $null
+
                 if($reader.Entry.IsDirectory)
                 {
                     Write-Verbose "Dossier ignoré : $($reader.Entry.Key)"
                 }
                 else
                 {
-                    # Crée l'objet de sortie :
-                    $o = [PSCustomObject] @{
-                        Fullname         = $reader.Entry.Key
-                        Extension        = [System.IO.Path]::GetExtension($reader.Entry.Key)
-                        Size             = $reader.Entry.Size
-                        CompressedSize   = $reader.Entry.CompressedSize
-                        RatioPct         = [int] [Math]::Floor(100 * $reader.Entry.CompressedSize /
-                                                                    $reader.Entry.Size)
-                        CRC              = $reader.Entry.Crc.ToString('X8')
+                    $o.Fullname         = $reader.Entry.Key
+                    $o.Extension        = [System.IO.Path]::GetExtension($reader.Entry.Key)
+                    $o.Size             = $reader.Entry.Size
+                    $o.CompressedSize   = $reader.Entry.CompressedSize
+                    $o.CRC              = $reader.Entry.Crc.ToString('X8')
+
+                    if (0 -ne $reader.Entry.Size)
+                    {
+                        <# Sur certains fichiers Zip, comme les docx produit par Google Docs/Takeout
+                        SharpCompres retourne des Size à 0. Point commun : Ils ont tous
+                        "Descriptor UTF8" dans la colonne “Caractéristiques”  visible dans 7-Zip.
+
+                        J’en ai trouvé une vingtaine avec :
+                        parcours_arbo.py --include *.docx --include *.xlsx | Get-ArchiveInfo |
+                                            ? CRC -Match '00000000' | Select ArchiveName,CRC | OGV
+
+                        Je les ai réenregistrés dans Word avec après une modification mineure.
+                        #>
+                        $o.RatioPct = [int] [Math]::Floor(100 * $reader.Entry.CompressedSize /
+                                                                $reader.Entry.Size)
                     }
-                    Add-Member -InputObject $o -MemberType MemberSet -Name PSStandardMembers `
-                                                                    -Value $standardMembers
-                    Write-Output $o
+
+                    # Création de l'objet de sortie :
+                    $objet_en_sortie = New-Object -TypeName PSObject -Property $o
+                    Add-Member -InputObject $objet_en_sortie -MemberType MemberSet `
+                                -Name PSStandardMembers -Value $standardMembers
+                    Write-Output $objet_en_sortie
                 }
+            }
+        }
+        catch [System.Management.Automation.MethodInvocationException]
+        {
+            if (($FullName -Like '*.docx' -or $FullName -Like '*.xlsx') -and
+                'InvalidOperationException' -eq $_.FullyQualifiedErrorId)
+            {
+                # Ce cas arrive sur les fichiers Office cryptés avec un pass
+                # SharpCompress n’arrive pas à ouvrir l’archive
+                $o.FullName = "/!\ CRYPTÉ : $FullName ($($_.Exception.InnerException.Message))"
+
+                # Création de l'objet de sortie :
+                $objet_en_sortie = New-Object -TypeName PSObject -Property $o
+                Add-Member -InputObject $objet_en_sortie -MemberType MemberSet `
+                            -Name PSStandardMembers -Value $standardMembers
+                Write-Output $objet_en_sortie
+            }
+            elseif ('IOException' -eq $_.FullyQualifiedErrorId)
+            {
+                Write-Warning "$Fullname : Ouverture impossible ($($_.Exception.InnerException.Message))"
+            }
+            elseif ('TypeInitializationException' -eq $_.FullyQualifiedErrorId)
+            {
+                Write-RedText "$Fullname : TypeInitializationException se produit quand il manque certaines assembly"
+                Write-RedText $_.Exception.InnerException.InnerException.Message
+                throw
+            }
+            else
+            {
+                Write-RedText $Fullname
+                Write-Verbose "rethrow"
+                SOE $_
+                throw
             }
         }
         catch
@@ -193,10 +287,13 @@ Process
             Write-Warning "ATTENTION : NE MARCHE QUE dans le terminal VS Code"
             Write-Warning "(manque des assembly dans la console Powershell)"
             $_ | Write-Warning
+
+            SOE $_
+            throw
         }
         finally
         {
-      <#      if ($reader)
+            if ($reader)
             {
                 $reader.Dispose()
             }
@@ -204,7 +301,6 @@ Process
             {
                 $filestream.Dispose() # Fermer le fichier pour le dévérouiller Sinon, le RarReader continue de vérouiller le fichier
             }
-        #>
         }
     } # ForEach
 } # Process
