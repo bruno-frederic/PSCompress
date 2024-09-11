@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
 Provides cmdlets related to SharpCompress .Net library
 
@@ -31,28 +31,21 @@ function Get-ArchiveInfo
 Affiche le taux de compression et autres informations pour pouvoir trier ensuite.
 
 .DESCRIPTION
-Format supportés par SharpCompress :
-https://github.com/adamhathcock/sharpcompress/blob/master/FORMATS.md
-Étonnant : en 2024 0.37.2, les bz2 simple (sans tar) ne sont pas supporté par SharpCompress
-
-Pour tester le support des différents formats, crééer un jeu de test avec CreeJeuDeTest.ps1 puis :
-import-module -force PSCompress ; gci * | get-archiveInfo -password somepas | select * | ft
-
-Et sur mes arborescence :
-parcours_arbo.py --include *.7z --include *.rar --include *.zip --include *.docx --include *.xlsx --include epub |
-    get-archiveInfo | select * | ogv
-
-Pour les chiffrées:
-    parcours_arbo.py --include *.bkp | Get-archiveInfo -password somepas | select * | ogv
-
-
+Permet de détecter quels types de fichier il est inutile de recompresser
+Anciennement nommée "Get-RARRatio"
 
 ATTENTION : MARCHE MIEUX dans le terminal VS Code "PowerShell Extension" spécifiquement
 (manque des assembly dans la console Powershell qu’il faut rajouter manuellement, ce que j’ai fait
 pour certaines verison de SharpCompress)
 
-Permet de détecter quels types de fichier il est inutile de recompresser
-Anciennement nommée "Get-RARRatio"
+Format supportés par SharpCompress :
+https://github.com/adamhathcock/sharpcompress/blob/master/FORMATS.md
+Étonnant : en 2024 0.37.2, les bz2 simple (sans tar) ne sont pas supportés par SharpCompress
+
+Pour tester le support des différents formats, créer un jeu de test avec CreeJeuDeTestArchives.ps1
+puis :
+GCI * | Get-ArchiveInfo -Password (ConvertTo-SecureString P@ssw0rd -AsPlainText -Force) |
+    Select * | Format-Table
 
 .OUTPUTS
 Suite de PSCustomObject. Certaines propriétés sont masquées par défaut.
@@ -166,7 +159,7 @@ Param(
     [string[]]$LiteralPath,
 
     [Parameter()]
-    [string] # TODO transformer en Secure String
+    [SecureString]
     $Password
 )
 
@@ -196,7 +189,6 @@ Process
     {
         [string] $FullName = $ExecutionContext.SessionState.Path.
                                      GetUnresolvedProviderPathFromPSPath($literal_path_courant)
-        Write-Verbose $FullName
 
         # Propriétés de l’objet de sortie :
         $o = [ordered]@{
@@ -216,23 +208,50 @@ Process
         try
         {
             $opts = New-Object SharpCompress.Readers.ReaderOptions -Property @{
-                Password        = $Password
+                # PS 7.0+ offers -AsPlainText parameter
+                Password = [Net.NetworkCredential]::new('', $Password).Password
             }
             [System.Collections.ArrayList] $entries = @()
 
 
-            if ($FullName -Like '*.7z')
+            if ($FullName -Like '*.rar' -Or $FullName -Like '*.bkp' -Or $FullName -Like '*.bko')
             {
-                # 7zip est particulier, il faudrait y accéder via les classes Archive car c’est un
+                 Write-Verbose "$FullName ouvert via objet RarArchive"
+
+                 # Opening large Rar Archive is faster with RarArchive object
+                 # /!\ d’après doc : SOLID Rars are only supported in the RarReader API.
+                 # mais en pratique cela semble fonctionner.
+                 $archive = [SharpCompress.Archives.Rar.RarArchive]::Open($FullName, $opts)
+
+                 $entries = @($archive.Entries)
+             }
+            elseif ($FullName -Like '*.7z')
+            {
+                Write-Verbose "$FullName ouvert via objet SevenZipArchive"
+
+                # 7zip est particulier, il faut y accéder via les classes Archive car c’est un
                 # format complexe, cf note 4 :
-                #  https://github.com/adamhathcock/sharpcompress/blob/master/FORMATS.md
+                # https://github.com/adamhathcock/sharpcompress/blob/master/FORMATS.md
 
                 $archive = [SharpCompress.Archives.SevenZip.SevenZipArchive]::Open($FullName, $opts)
 
                 $entries = @($archive.Entries)
             }
+            elseif ($FullName -Like '*.zip' -Or $FullName -Like '*.apk' -Or
+                    $FullName -Like '*.epub' -Or
+                    $FullName -Like '*.docx' -Or $FullName -Like '*.xlsx')
+           {
+                 Write-Verbose "$FullName ouvert via objet ZipArchive"
+
+                 $archive = [SharpCompress.Archives.Zip.ZipArchive]::Open($FullName, $opts)
+
+                $entries = @($archive.Entries)
+            }
             else
             {
+                Write-Verbose "$FullName ouvert via objet Reader"
+                # Un avantage du Reader est de permettre l’interruption de l’opération via Ctrl+C
+
                 $filestream = [System.IO.File]::OpenRead($FullName)
 
                 # Use ReaderFactory to autodetect archive type and Open the entry stream
@@ -294,19 +313,17 @@ Process
         {
             if ('InvalidOperationException' -eq $_.FullyQualifiedErrorId)
             {
-                # Ce cas arrive sur les formats d’archives non supportés
-                # et les fichiers Office cryptés avec un pass
-                # SharpCompress n’arrive pas à ouvrir l’archive
-
-                Write-Warning "$Fullname : Ouverture impossible ($($_.Exception.InnerException.Message))"
-
-                $o.FullName = "/!\ $FullName ($($_.Exception.InnerException.Message))"
+                # Quand on tente l’ouverture avec un Reader : ce cas arrive sur les formats
+                # d’archives non supportés  et les fichiers Office cryptés avec un pass
+                $o.FullName = "- $FullName ($($_.Exception.InnerException.Message))"
 
                 # Création de l'objet de sortie :
                 $objet_en_sortie = New-Object -TypeName PSObject -Property $o
                 Add-Member -InputObject $objet_en_sortie -MemberType MemberSet `
                             -Name PSStandardMembers -Value $standardMembers
                 Write-Output $objet_en_sortie
+
+                Write-Error "$Fullname : Ouverture impossible ($($_.Exception.InnerException.Message))"
             }
             elseif ('IOException' -eq $_.FullyQualifiedErrorId)
             {
@@ -314,7 +331,7 @@ Process
             }
             elseif ('CryptographicException' -eq $_.FullyQualifiedErrorId)
             {
-                Write-Warning "$Fullname : Déchiffrement impossible ($($_.Exception.InnerException.Message))"
+                Write-Warning "$Fullname : Déchiffrement impossible (CryptographicException : $($_.Exception.InnerException.Message))"
             }
             elseif ('MultiVolumeExtractionException' -eq $_.FullyQualifiedErrorId)
             {
@@ -324,13 +341,53 @@ Process
             elseif ('InvalidFormatException' -eq $_.FullyQualifiedErrorId)
             {
                 # Se produit sur les Rar4 chiffrés entête + fichiers : Unknown Rar Header: …
-                Write-Warning "$Fullname : Déchiffrement impossible d’un Rar4 ($($_.Exception.InnerException.Message))"
+                # et d’autres archives
+                # c’est un peu la même exception que BadEnumeration avec un objet RarArchive
+                Write-Warning "$Fullname : Déchiffrement impossible (InvalidFormatException : $($_.Exception.InnerException.Message))"
+            }
+            elseif ('EndOfStreamException' -eq $_.FullyQualifiedErrorId)
+            {
+                # Constaté sur un zip corrompu : WinAPE20B1Upd.zip
+                $o.FullName = "- $FullName ($($_.Exception.InnerException.Message))"
+
+                # Création de l'objet de sortie :
+                $objet_en_sortie = New-Object -TypeName PSObject -Property $o
+                Add-Member -InputObject $objet_en_sortie -MemberType MemberSet `
+                            -Name PSStandardMembers -Value $standardMembers
+                Write-Output $objet_en_sortie
+
+                Write-Error "$Fullname : corrompue ($($_.Exception.InnerException.Message))"
+            }
+            elseif ('OverflowException' -eq $_.FullyQualifiedErrorId)
+            {
+                # Rencontré sur une seule archive  quand on tente de l’ouvrir avec un mauvais pass:
+                # Programmation\Scripts obsoletes\Mount TC remplace par Bitlocker.bko
+                Write-Warning "$Fullname : Déchiffrement impossible (OverflowException : $($_.Exception.InnerException.Message))"
             }
             elseif ('TypeInitializationException' -eq $_.FullyQualifiedErrorId)
             {
                 Write-RedText "$Fullname : TypeInitializationException se produit quand il manque certaines assembly"
                 Write-RedText $_.Exception.InnerException.InnerException.Message
                 throw
+            }
+            else
+            {
+                Write-RedText $Fullname
+                Write-Verbose "rethrow"
+                SOE $_
+                throw
+            }
+        }
+        catch [System.Management.Automation.RuntimeException]
+        {
+            if ('BadEnumeration' -eq $_.FullyQualifiedErrorId)
+            {
+                <# Surivent sur Rar ou Docx chiffré quand on tente l’ouverture avec un RarArchive ou
+                 ZipArchive ou quand ce n’est pas une archive.
+
+                Et quelques autres Rar bizarrement.
+                #>
+                Write-Warning "$Fullname : Déchiffrement impossible (BadEnumeration : $($_.Exception.InnerException.Message))"
             }
             else
             {

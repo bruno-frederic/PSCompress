@@ -26,6 +26,9 @@ Describe "Encrypted archives" {
     Push-Location
     Set-Location TestDrive:
 
+    $Pass = 'P@ssw0rd'
+    $SecurePass = ConvertTo-SecureString -String $Pass -AsPlainText -Force
+
     $Samplefile = 'Samplefile.txt'
     'Sample content' | Out-File $Samplefile
     $Size = Get-Item $Samplefile | Select-Object -expand Length
@@ -34,8 +37,8 @@ Describe "Encrypted archives" {
 
   It 'ZipCrypto' {
     Remove-Item Archive.*
-    cmd /c start /wait d:\utils\winrar\WinRAR a -psomepas -mezl Archive.zip $Samplefile
-    $o = Get-ArchiveInfo -Password somepas -LiteralPath Archive.zip
+    cmd /c start /wait d:\utils\winrar\WinRAR a -p"$Pass" -mezl Archive.zip $Samplefile
+    $o = Get-ArchiveInfo -Password $SecurePass -LiteralPath Archive.zip
 
     $o.Fullname | Should -Be $Samplefile
     $o.Size     | Should -Be $Size
@@ -45,8 +48,8 @@ Describe "Encrypted archives" {
 
   It 'Zip AES-256' {
     Remove-Item Archive.*
-    cmd /c start /wait d:\utils\winrar\WinRAR a -psomepas Archive.zip $Samplefile
-    $o = Get-ArchiveInfo -Password somepas -LiteralPath Archive.zip
+    cmd /c start /wait d:\utils\winrar\WinRAR a -p"$Pass" Archive.zip $Samplefile
+    $o = Get-ArchiveInfo -Password $SecurePass -LiteralPath Archive.zip
 
     $o.Fullname | Should -Be $Samplefile
     $o.Size     | Should -Be $Size
@@ -58,8 +61,8 @@ Describe "Encrypted archives" {
 
   It '7z Encrypted' {
     Remove-Item Archive.*
-    7z a -psomepas     Archive.7z $Samplefile
-    $o = Get-ArchiveInfo -Password somepas -LiteralPath Archive.7z
+    7z a -p"$Pass"     Archive.7z $Samplefile
+    $o = Get-ArchiveInfo -Password $SecurePass -LiteralPath Archive.7z
 
     $o.Fullname | Should -Be $Samplefile
     $o.Size     | Should -Be $Size
@@ -69,8 +72,8 @@ Describe "Encrypted archives" {
 
   It '7z filenames Encrypted' {
     Remove-Item Archive.*
-    7z a -psomepas -mhe Archive.7z $Samplefile
-    $o = Get-ArchiveInfo -Password somepas -LiteralPath Archive.7z
+    7z a -p"$Pass" -mhe Archive.7z $Samplefile
+    $o = Get-ArchiveInfo -Password $SecurePass -LiteralPath Archive.7z
 
     $o.Fullname | Should -Be $Samplefile
     $o.Size     | Should -Be $Size
@@ -80,8 +83,8 @@ Describe "Encrypted archives" {
 
   It 'RAR Encrypted' {
     Remove-Item Archive.*
-    rar a -psomepas Archive.rar $Samplefile
-    $o = Get-ArchiveInfo -Password somepas -LiteralPath Archive.rar
+    rar a -ps"$Pass" Archive.rar $Samplefile
+    $o = Get-ArchiveInfo -Password $SecurePass -LiteralPath Archive.rar
 
     $o.Fullname | Should -Be $Samplefile
     $o.Size     | Should -Be $Size
@@ -93,8 +96,8 @@ Describe "Encrypted archives" {
 
   It 'RAR filenames Encrypted' {
     Remove-Item Archive.*
-    rar a -hpsomepas Archive.rar $Samplefile
-    $o = Get-ArchiveInfo -Password somepas -LiteralPath Archive.rar
+    rar a -hp"$Pass" Archive.rar $Samplefile
+    $o = Get-ArchiveInfo -Password $SecurePass -LiteralPath Archive.rar
 
     $o.Fullname | Should -Be $Samplefile
     $o.Size     | Should -Be $Size
