@@ -31,6 +31,13 @@ function Get-ArchiveInfo
 Affiche le taux de compression et autres informations pour pouvoir trier ensuite.
 
 .DESCRIPTION
+Format supportés par SharpCompress :
+https://github.com/adamhathcock/sharpcompress/blob/master/FORMATS.md
+
+TODO : Révérifier ce que supporte SharpCompress comme format 7z par des tests!!!
+Il faudrait y accéder via les classes Archive car c’est un format différent, cf note 4
+Archive classes allow random access to a seekable stream.
+
 ATTENTION : MARCHE MIEUX dans le terminal VS Code "PowerShell Extension" spécifiquement
 (manque des assembly dans la console Powershell qu’il faut rajouter manuellement, ce que j’ai fait
 pour certaines verison de SharpCompress)
@@ -147,7 +154,11 @@ Param(
                 Position=1)]
     [ValidateScript({Test-Path -LiteralPath $_ -PathType 'Leaf'})]
     [Alias("PSPath")]
-    [string[]]$LiteralPath
+    [string[]]$LiteralPath,
+
+    [Parameter()]
+    [string]
+    $Password
 )
 
 Begin
@@ -189,20 +200,19 @@ Process
             CRC              = $null
         }
         $filestream = $null
-        $reader = ''    # création de la variable pour que le finally puisse la détruire (il me semble que $null posait problême car pas de méthode Dispose)
+        $reader = $null
+        #$reader = ''    # création de la variable pour que le finally puisse la détruire (il me semble que $null posait problême car pas de méthode Dispose)
 
         try
         {
             $filestream = [System.IO.File]::OpenRead($FullName)
-            $reader = [SharpCompress.Readers.ReaderFactory]::Open($filestream)
 
-            #TODO Support des archives cryptées
-<#            $opts = New-Object SharpCompress.Readers.ReaderOptions -Property @{
-               LeaveStreamOpen = $True
-               #Password        = 'xxxx yyyy xxxx' # Ca marche sur les .zip cryptés mais pas avec les .rar
+            $opts = New-Object SharpCompress.Readers.ReaderOptions -Property @{
+               Password        = $Password
             }
+
+            # Use ReaderFactory to autodetect archive type and Open the entry stream
             $reader = [SharpCompress.Readers.ReaderFactory]::Open($filestream, $opts)
-#>
 
             while ($reader.MoveToNextEntry())
             {
@@ -263,6 +273,10 @@ Process
                 Add-Member -InputObject $objet_en_sortie -MemberType MemberSet `
                             -Name PSStandardMembers -Value $standardMembers
                 Write-Output $objet_en_sortie
+            }
+            elseif ('CryptographicException' -eq $_.FullyQualifiedErrorId)
+            {
+                Write-Warning "$Fullname : Déchiffrement impossible ($($_.Exception.InnerException.Message))"
             }
             elseif ('IOException' -eq $_.FullyQualifiedErrorId)
             {
