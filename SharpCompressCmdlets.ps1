@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Provides cmdlets related to SharpCompress .Net library
 
@@ -199,6 +199,7 @@ Process
             CompressedSize   = $null
             RatioPct         = $null
             CRC              = $null
+            IsEncrypted      = $null
         }
         $archive     = $null
         $filestream  = $null
@@ -240,12 +241,12 @@ Process
             elseif ($FullName -Like '*.zip' -Or $FullName -Like '*.apk' -Or
                     $FullName -Like '*.epub' -Or
                     $FullName -Like '*.docx' -Or $FullName -Like '*.xlsx')
-           {
+            {
                  Write-Verbose "$FullName ouvert via objet ZipArchive"
 
                  $archive = [SharpCompress.Archives.Zip.ZipArchive]::Open($FullName, $opts)
 
-                $entries = @($archive.Entries)
+                 $entries = @($archive.Entries)
             }
             else
             {
@@ -271,6 +272,7 @@ Process
                 $o.CompressedSize   = $null
                 $o.RatioPct         = $null
                 $o.CRC              = $null
+                $o.IsEncrypted      = $null
 
 
                 if($entry.IsDirectory)
@@ -284,6 +286,7 @@ Process
                     $o.Size             = $entry.Size
                     $o.CompressedSize   = $entry.CompressedSize
                     $o.CRC              = $entry.Crc.ToString('X8')
+                    $o.IsEncrypted      = $entry.IsEncrypted
 
                     if (0 -ne $entry.Size)
                     {
